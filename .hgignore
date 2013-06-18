@@ -1,0 +1,5 @@
+syntax: regexp
+(^|/)\.buildpath$
+(^|/)\.project$
+(^|/)\.settings/
+(^|/)\.cproject$
