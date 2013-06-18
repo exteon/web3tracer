@@ -1,0 +1,52 @@
+Modification History:
+
+2.0.0 - 18.06.2013
+===============================================================================
+Changes:
+	- Deprecated KcacheGrind output in the module
+	- Added WEB3TRACER_OUTPT_PROCESSED format to return run data in PHP native
+		associative array format
+	- web3tracer_disable() signature changed
+
+Improvements:
+	- Fixed Kcachegrind output for double timestamps to allow for longer 
+		than 2 seconds trace times (maximum run time should be about 52 days
+		now)
+	- Added back memory profiling
+
+Known bugs/limitations:
+	1) Not tested in TS (multi-threaded) mode
+	2) Segfaults if enough memory is not available
+
+
+
+1.0.1 - 12.10.2012
+===============================================================================
+Redesign:
+	- Trace memory is now allocated using mmap and mlock'ed for better 
+		performance
+	- Dropped PHP internal emalloc/efree/estrdup handlers
+
+Improvements:
+	- Better performance
+	- Added overhead.php overhead test script in examples folder
+	
+Known bugs/limitations:
+	1) Not tested in TS (multi-threaded) mode
+	2) Segfaults if enough memory is not available
+
+1.0.0
+===============================================================================
+Initial release
+	- Based on xhprof 
+		https://github.com
+			/facebook/xhprof/tree/c90e96609813a2f370cae23a4a19a641523452ef
+Known bugs/limitations:
+	1) Not tested in TS (multi-threaded) mode
+
+Authors:
+  Constantin-Emil Marina	dinu.marina@exteon.ro
+  Haiping Zhao           	hzhao@facebook.com
+  Kannan Muthukkaruppan  	kannan@facebook.com
+  Venkat Venkataramani   	veeve@facebook.com
+  Changhao Jiang         	cjiang@facebook.com
