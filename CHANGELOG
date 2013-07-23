@@ -1,5 +1,16 @@
 Modification History:
 
+2.0.1 - 24.07.2013
+===============================================================================
+Bugfixes:
+	- Occasional segfault on web3tracer_disable
+
+	Known bugs/limitations:
+	1) Not tested in TS (multi-threaded) mode
+	2) Segfaults if enough memory is not available
+
+
+
 2.0.0 - 18.06.2013
 ===============================================================================
 Changes:
