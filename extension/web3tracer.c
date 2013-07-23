@@ -259,15 +259,11 @@ PHP_FUNCTION(web3tracer_disable) {
 			RETURN_LONG(WEB3TRACER_OK_VAL);
 			break;
 		case WEB3TRACER_OUTPUT_PROCESSED_VAL:
-			if (WEB3TRACER_G(z_out)) {
-				zval_dtor(WEB3TRACER_G(z_out));
-				FREE_ZVAL(WEB3TRACER_G(z_out));
-			}
 			MAKE_STD_ZVAL(WEB3TRACER_G(z_out));
 			array_init(WEB3TRACER_G(z_out));
 			web3tracer_process_output();
 			web3tracer_free(TSRMLS_C);
-			RETURN_ZVAL(WEB3TRACER_G(z_out),0,0);
+			RETURN_ZVAL(WEB3TRACER_G(z_out),0,1);
 			break;
 		default:
 			web3tracer_free(TSRMLS_C);
