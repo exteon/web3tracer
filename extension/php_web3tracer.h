@@ -96,8 +96,8 @@ PHP_MINFO_FUNCTION(web3tracer);
 
 PHP_FUNCTION(web3tracer_enable);
 PHP_FUNCTION(web3tracer_disable);
-PHP_FUNCTION(web3tracer_sample_enable);
-PHP_FUNCTION(web3tracer_sample_disable);
+PHP_FUNCTION(web3tracer_tag);
+PHP_FUNCTION(web3tracer_endTag);
 
 /**
  * **********************
@@ -206,6 +206,7 @@ typedef struct web3tracer_cg_proc_t {
 	char*							call_file;
 	uint							call_line_no;
 	int								dealloc_include_file;
+	uint32							tagNo;
 } web3tracer_entry_t; 
 typedef struct web3tracer_entry_chunk_t {
 	web3tracer_entry_t				entries[WEB3TRACER_CALL_LIST_INCREMENT];
@@ -214,8 +215,13 @@ typedef struct web3tracer_entry_chunk_t {
 } web3tracer_entry_chunk_t;
 
 ZEND_BEGIN_MODULE_GLOBALS(web3tracer)
-	/* Indicates if web3trace is currently enabled */
-	int              enabled;
+	/* web3tracer state */
+	int             	enabled;
+	int					opt_separateCompileFunc;
+	char				*reqNewTag;
+	int					reqEndTag;
+	web3tracer_entry_t	*lastInEntry,
+						*parentInEntry;
 	
 	/* Output variable */
 	zval	*z_out;

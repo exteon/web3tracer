@@ -49,6 +49,8 @@ static void clear_frequencies(TSRMLS_D);
 static void get_all_cpu_frequencies(TSRMLS_D);
 static long get_us_interval(struct timeval *start, struct timeval *end TSRMLS_DC);
 static inline double get_us_from_tsc(uint64 count, double cpu_frequency TSRMLS_DC);
+static zval * web3tracer_hash_lookup(zval *arr, char *symbol, int init TSRMLS_DC);
+static void web3tracer_procTag3(TSRMLS_D);
 
 ZEND_DLEXPORT void web3tracer_execute (zend_op_array *ops TSRMLS_DC);
 ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data, int ret TSRMLS_DC);
@@ -57,11 +59,19 @@ ZEND_DLEXPORT zend_op_array* web3tracer_compile_string(zval *source_string, char
 
 /* {{{ arginfo */
 ZEND_BEGIN_ARG_INFO(arginfo_web3tracer_enable, 0)
+	ZEND_ARG_INFO(0,options)
 ZEND_END_ARG_INFO()
 
 ZEND_BEGIN_ARG_INFO(arginfo_web3tracer_disable, 0)
 	ZEND_ARG_INFO(0,output)
 	ZEND_ARG_INFO(0,filename)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(arginfo_web3tracer_tag, 0)
+	ZEND_ARG_INFO(0,tagName)
+ZEND_END_ARG_INFO()
+
+ZEND_BEGIN_ARG_INFO(arginfo_web3tracer_endTag, 0)
 ZEND_END_ARG_INFO()
 
 /**
@@ -73,6 +83,8 @@ ZEND_END_ARG_INFO()
 zend_function_entry web3tracer_functions[] = {
   PHP_FE(web3tracer_enable, arginfo_web3tracer_enable)
   PHP_FE(web3tracer_disable, arginfo_web3tracer_disable)
+  PHP_FE(web3tracer_tag, arginfo_web3tracer_tag)
+  PHP_FE(web3tracer_endTag, arginfo_web3tracer_endTag)
   {NULL, NULL, NULL}
 };
 
@@ -153,45 +165,62 @@ void web3tracer_free_locked( void *ptr, size_t size ){
  * @author kannan
  */
 PHP_FUNCTION(web3tracer_enable) {
-  if (!WEB3TRACER_G(enabled)) {
-    WEB3TRACER_G(enabled)      = 1;
-	WEB3TRACER_G(call_no)=0;
+	zval	*options = 0;
+	zval	*crtOpt;
+	if (!WEB3TRACER_G(enabled)) {
+		if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC,"|a", &options) == FAILURE) {
+			return;
+		}
+		if(options){
+			crtOpt=web3tracer_hash_lookup(options,"separateCompileFunc",0 TSRMLS_CC);
+			if(crtOpt){
+				convert_to_boolean_ex(&crtOpt);
+				WEB3TRACER_G(opt_separateCompileFunc)=Z_BVAL_P(crtOpt);
+			}
+		}
+		
+		WEB3TRACER_G(enabled)      = 1;
+		WEB3TRACER_G(call_no)		=0;
+		WEB3TRACER_G(reqNewTag)		=0;
+		WEB3TRACER_G(reqEndTag)		=0;
+		WEB3TRACER_G(lastInEntry)	=0;
+		WEB3TRACER_G(parentInEntry)	=0;
 
-    /* Replace zend_compile with our proxy */
-    WEB3TRACER_G(_zend_compile_file) = zend_compile_file;
-    zend_compile_file  = web3tracer_compile_file;
+		/* Replace zend_compile with our proxy */
+		WEB3TRACER_G(_zend_compile_file) = zend_compile_file;
+		zend_compile_file  = web3tracer_compile_file;
 
-    /* Replace zend_compile_string with our proxy */
-    WEB3TRACER_G(_zend_compile_string) = zend_compile_string;
-    zend_compile_string = web3tracer_compile_string;
+		/* Replace zend_compile_string with our proxy */
+		WEB3TRACER_G(_zend_compile_string) = zend_compile_string;
+		zend_compile_string = web3tracer_compile_string;
 
-    /* Replace zend_execute with our proxy */
-    WEB3TRACER_G(_zend_execute) = zend_execute;
-    zend_execute  = web3tracer_execute;
+		/* Replace zend_execute with our proxy */
+		WEB3TRACER_G(_zend_execute) = zend_execute;
+		zend_execute  = web3tracer_execute;
 
-    /* Replace zend_execute_internal with our proxy */
-    WEB3TRACER_G(_zend_execute_internal) = zend_execute_internal;
-	zend_execute_internal = web3tracer_execute_internal;
+		/* Replace zend_execute_internal with our proxy */
+		WEB3TRACER_G(_zend_execute_internal) = zend_execute_internal;
+		zend_execute_internal = web3tracer_execute_internal;
 	
 
-	/* NOTE(cjiang): some fields such as cpu_frequencies take relatively longer
-	 * to initialize, (5 milisecond per logical cpu right now), therefore we
-	 * calculate them lazily. */
-	if (WEB3TRACER_G(cpu_frequencies) == NULL) {
-		get_all_cpu_frequencies(TSRMLS_C);
-		restore_cpu_affinity(&WEB3TRACER_G(prev_mask) TSRMLS_CC);
+		/* NOTE(cjiang): some fields such as cpu_frequencies take relatively longer
+		 * to initialize, (5 milisecond per logical cpu right now), therefore we
+		 * calculate them lazily. */
+		if (WEB3TRACER_G(cpu_frequencies) == NULL) {
+			get_all_cpu_frequencies(TSRMLS_C);
+			restore_cpu_affinity(&WEB3TRACER_G(prev_mask) TSRMLS_CC);
+		}
+
+		/* bind to a random cpu so that we can use rdtsc instruction. */
+		bind_to_cpu((int) (rand() % WEB3TRACER_G(cpu_num)) TSRMLS_CC);
+
+		WEB3TRACER_G(first_entry_chunk)=WEB3TRACER_G(last_entry_chunk)=web3tracer_alloc_locked(sizeof(web3tracer_entry_chunk_t));
+		WEB3TRACER_G(next_entry)=&(WEB3TRACER_G(first_entry_chunk)->entries[0]);
+
+		WEB3TRACER_G(first_entry_chunk)->next=NULL;
+		WEB3TRACER_G(first_entry_chunk)->len=0;
+		web3tracer_add_in(0, cycle_timer(), WEB3TRACER_ROOT_SYMBOL, NULL, 0, NULL, NULL, 0, 0 TSRMLS_CC);
 	}
-
-  /* bind to a random cpu so that we can use rdtsc instruction. */
-	bind_to_cpu((int) (rand() % WEB3TRACER_G(cpu_num)) TSRMLS_CC);
-
-	WEB3TRACER_G(first_entry_chunk)=WEB3TRACER_G(last_entry_chunk)=web3tracer_alloc_locked(sizeof(web3tracer_entry_chunk_t));
-	WEB3TRACER_G(next_entry)=&(WEB3TRACER_G(first_entry_chunk)->entries[0]);
-
-	WEB3TRACER_G(first_entry_chunk)->next=NULL;
-	WEB3TRACER_G(first_entry_chunk)->len=0;
-	web3tracer_add_in(0, cycle_timer(), WEB3TRACER_ROOT_SYMBOL, NULL, 0, NULL, NULL, 0, 0 TSRMLS_CC);
-  }
 }
 
 /**
@@ -206,7 +235,8 @@ PHP_FUNCTION(web3tracer_disable) {
 	char						*filename;
 	int							filename_len,
 								level=0,
-								have_nesting_error=0;
+								have_nesting_error=0,
+								have_nesting_error_pending=0;
 	long						output;
 	FILE						*output_file;
 	uint32						i;
@@ -221,8 +251,13 @@ PHP_FUNCTION(web3tracer_disable) {
 		web3tracer_free(TSRMLS_C);
 		return;
 	}
+	web3tracer_procTag3(TSRMLS_C);
 	for(chunkCursor=WEB3TRACER_G(first_entry_chunk);chunkCursor;chunkCursor=chunkCursor->next){
 		for(i=0;i<chunkCursor->len;i++){
+			if(have_nesting_error_pending){
+				have_nesting_error=1;
+				break;
+			}
 			switch(chunkCursor->entries[i].in_out){
 				case 0:
 					level++;
@@ -231,19 +266,22 @@ PHP_FUNCTION(web3tracer_disable) {
 					level--;
 					break;
 			}
-			if(level<=0){
+			if(level<0){
 				have_nesting_error=1;
 				break;
 			}
+			if(level==0){
+				have_nesting_error_pending=1;
+			}
 		}
 	}
-	if(level!=2)
+	if(level!=0)
 		have_nesting_error=1;
 	if(have_nesting_error){
 		web3tracer_free(TSRMLS_C);
 		RETURN_LONG(WEB3TRACER_ERROR_NESTING_VAL);
 	}
-	web3tracer_replace_out(0 TSRMLS_CC);
+	
 	switch(output){
 		case WEB3TRACER_OUTPUT_XT_VAL:
 			output_file=fopen(filename,"w");
@@ -268,6 +306,23 @@ PHP_FUNCTION(web3tracer_disable) {
 		default:
 			web3tracer_free(TSRMLS_C);
 			RETURN_LONG(WEB3TRACER_ERROR_UNKNOWN_OUTPUT_FORMAT_VAL);
+	}
+}
+
+PHP_FUNCTION(web3tracer_tag){
+	char 	*tagName;
+	int		tagNameLen;
+	if(WEB3TRACER_G(enabled)){
+		if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC,"s", &tagName, &tagNameLen) == FAILURE) {
+			return;
+		}
+		WEB3TRACER_G(reqNewTag)=strdup(tagName);
+	}
+}
+
+PHP_FUNCTION(web3tracer_endTag){
+	if(WEB3TRACER_G(enabled)){
+		WEB3TRACER_G(reqEndTag)=1;
 	}
 }
 
@@ -410,7 +465,7 @@ PHP_MINFO_FUNCTION(web3tracer TSRMLS_DC)
  *
  * @author kannan, veeve, Constantin-Emil MARINA
  */
-zval * web3tracer_hash_lookup(zval *arr, char *symbol  TSRMLS_DC) {
+static zval * web3tracer_hash_lookup(zval *arr, char *symbol, int init TSRMLS_DC) {
 	HashTable   *ht;
 	void        *data;
 	zval        *counts = (zval *) 0;
@@ -419,16 +474,18 @@ zval * web3tracer_hash_lookup(zval *arr, char *symbol  TSRMLS_DC) {
 	if (!arr || !(ht = HASH_OF(arr))) {
 		return (zval *) 0;
 	}
-
+	
 	/* Lookup our hash table */
 	if (zend_hash_find(ht, symbol, strlen(symbol) + 1, &data) == SUCCESS) {
 		/* Symbol already exists */
 		counts = *(zval **) data;
-	}	else {
-		/* Add symbol to hash table */
-		MAKE_STD_ZVAL(counts);
-		array_init(counts);
-		add_assoc_zval(arr, symbol, counts);
+	} else {
+		if (init) {
+			/* Add symbol to hash table */
+			MAKE_STD_ZVAL(counts);
+			array_init(counts);
+			add_assoc_zval(arr, symbol, counts);
+		}
 	}
 
 	return counts;
@@ -439,7 +496,7 @@ zval * web3tracer_hash_lookup(zval *arr, char *symbol  TSRMLS_DC) {
  *
  * @author Constantin-Emil MARINA
  */
-void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) {
+static void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) {
 	HashTable   *ht;
 	void        *data;
 
@@ -455,32 +512,32 @@ void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) {
 }
 
 
- static void web3tracer_add_output_internal(char *fname, uint64 time, uint64 mmax, uint64 mall, uint64 mfre, uint64 mvar){
+ static void web3tracer_add_output_internal(char *fname, uint64 time, uint64 mmax, uint64 mall, uint64 mfre, uint64 mvar TSRMLS_DC){
 	zval	*z_entry;
 	
-	z_entry=web3tracer_hash_lookup(WEB3TRACER_G(z_out),fname);
-	z_entry=web3tracer_hash_lookup(z_entry,"stats");
-	web3tracer_hash_add(z_entry,"time",time);
-	web3tracer_hash_add(z_entry,"mmax",mmax);
-	web3tracer_hash_add(z_entry,"mall",mall);
-	web3tracer_hash_add(z_entry,"mfre",mfre);
-	web3tracer_hash_add(z_entry,"mvar",mvar);
-	web3tracer_hash_add(z_entry,"calls",1);
+	z_entry=web3tracer_hash_lookup(WEB3TRACER_G(z_out),fname,1 TSRMLS_CC);
+	z_entry=web3tracer_hash_lookup(z_entry,"stats",1 TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"time",time TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"mmax",mmax TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"mall",mall TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"mfre",mfre TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"mvar",mvar TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"calls",1 TSRMLS_CC);
 }
 
- static void web3tracer_add_output_call(char *caller, char* callee, uint64 time, uint64 mmax, uint64 mall, uint64 mfre, uint64 mvar){
+ static void web3tracer_add_output_call(char *caller, char* callee, uint64 time, uint64 mmax, uint64 mall, uint64 mfre, uint64 mvar TSRMLS_DC){
 	zval	*z_entry;
 	
-	z_entry=web3tracer_hash_lookup(WEB3TRACER_G(z_out),caller);
-	z_entry=web3tracer_hash_lookup(z_entry,"callees");
-	z_entry=web3tracer_hash_lookup(z_entry,callee);
-	z_entry=web3tracer_hash_lookup(z_entry,"stats");
-	web3tracer_hash_add(z_entry,"time",time);
-	web3tracer_hash_add(z_entry,"mmax",mmax);
-	web3tracer_hash_add(z_entry,"mall",mall);
-	web3tracer_hash_add(z_entry,"mfre",mfre);
-	web3tracer_hash_add(z_entry,"mvar",mvar);
-	web3tracer_hash_add(z_entry,"calls",1);
+	z_entry=web3tracer_hash_lookup(WEB3TRACER_G(z_out),caller,1 TSRMLS_CC);
+	z_entry=web3tracer_hash_lookup(z_entry,"callees",1 TSRMLS_CC);
+	z_entry=web3tracer_hash_lookup(z_entry,callee,1 TSRMLS_CC);
+	z_entry=web3tracer_hash_lookup(z_entry,"stats",1 TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"time",time TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"mmax",mmax TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"mall",mall TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"mfre",mfre TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"mvar",mvar TSRMLS_CC);
+	web3tracer_hash_add(z_entry,"calls",1 TSRMLS_CC);
 }
  
  /**
@@ -578,11 +635,11 @@ void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) {
 						web3tracer_cg_stop(mfre,lastCall->mall.childAmounts-dmem);
 						web3tracer_cg_stop(mvar,2*lastCall->mall.childAmounts-dmem);
 					}
-					web3tracer_add_output_internal(lastCall->fn,(uint64)(1000*get_us_from_tsc(time.internalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.internalAmount,mall.internalAmount,mfre.internalAmount,mvar.internalAmount);
+					web3tracer_add_output_internal(lastCall->fn,(uint64)(1000*get_us_from_tsc(time.internalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)]) TSRMLS_CC),mmax.internalAmount,mall.internalAmount,mfre.internalAmount,mvar.internalAmount);
 					if(lastCall->cycle){
-						web3tracer_add_output_call(lastCall->cycle->name,lastCall->fn,(uint64)(1000*get_us_from_tsc(time.totalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.totalAmount,mall.totalAmount,mfre.totalAmount,mvar.totalAmount);
+						web3tracer_add_output_call(lastCall->cycle->name,lastCall->fn,(uint64)(1000*get_us_from_tsc(time.totalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.totalAmount,mall.totalAmount,mfre.totalAmount,mvar.totalAmount TSRMLS_CC);
 						if(lastCall->cycleSource==lastCall&&lastCall->prev){
-							web3tracer_add_output_call(lastCall->prev->fn,lastCall->cycle->name,(uint64)(1000*get_us_from_tsc(lastCall->cycle->time.amount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),lastCall->cycle->mmax.amount,lastCall->cycle->mall.amount,lastCall->cycle->mfre.amount,lastCall->cycle->mvar.amount);
+							web3tracer_add_output_call(lastCall->prev->fn,lastCall->cycle->name,(uint64)(1000*get_us_from_tsc(lastCall->cycle->time.amount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),lastCall->cycle->mmax.amount,lastCall->cycle->mall.amount,lastCall->cycle->mfre.amount,lastCall->cycle->mvar.amount TSRMLS_CC);
 							lastCall->cycle->time.amount=0;
 							lastCall->cycle->mmax.amount=0;
 							lastCall->cycle->mall.amount=0;
@@ -591,7 +648,7 @@ void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) {
 						}
 					} else {
 						if(lastCall->prev){
-							web3tracer_add_output_call(lastCall->prev->fn,lastCall->fn,(uint64)(1000*get_us_from_tsc(time.totalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.totalAmount,mall.totalAmount,mfre.totalAmount,mvar.totalAmount);
+							web3tracer_add_output_call(lastCall->prev->fn,lastCall->fn,(uint64)(1000*get_us_from_tsc(time.totalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.totalAmount,mall.totalAmount,mfre.totalAmount,mvar.totalAmount TSRMLS_CC);
 						}
 					}
 					free(lastCall->fn);
@@ -673,7 +730,7 @@ static void web3tracer_output_xt(FILE *output_file TSRMLS_DC){
  *
  * @author Constantin-Emil Marina
  */
-web3tracer_entry_t *web3tracer_alloc_call(TSRMLS_D){
+static web3tracer_entry_t *web3tracer_alloc_call(TSRMLS_D){
 	web3tracer_entry_chunk_t	*new_chunk;
 	web3tracer_entry_t			*ret;
 	uint32						*len=&(WEB3TRACER_G(last_entry_chunk)->len);
@@ -714,6 +771,9 @@ static void web3tracer_add_in(uint32 call_no, uint64 time, char *func_name, char
 	entry->call_file				=call_file;
 	entry->call_line_no				=call_line_no;
 	entry->dealloc_include_file		=dealloc_include_file;
+	entry->tagNo					=0;
+	
+	WEB3TRACER_G(lastInEntry)=entry;
 }
 /**
  * Add function end entry.
@@ -750,14 +810,14 @@ static void web3tracer_replace_out(uint32 call_no TSRMLS_DC){
  *
  * @author cjiang
  */
-inline double get_us_from_tsc(uint64 count, double cpu_frequency) {
+static inline double get_us_from_tsc(uint64 count, double cpu_frequency) {
   return count / cpu_frequency;
 }
 
 /**
  * Add function begin entry, with formation of function name.
  */
-int web3tracer_in(int internal_user TSRMLS_DC) {
+static int web3tracer_in(int internal_user TSRMLS_DC) {
 	zend_execute_data	*data;
 	zend_function		*function;
 	char				*func_name;
@@ -843,14 +903,71 @@ int web3tracer_in(int internal_user TSRMLS_DC) {
 		); 
 		return 1;*/
 }
-void web3tracer_out(uint32 call_no TSRMLS_DC){
+static void web3tracer_out(uint32 call_no TSRMLS_DC){
 	web3tracer_add_out(
 		call_no,
 		cycle_timer()
 		TSRMLS_CC
 	);
 }
+static void web3tracer_procTag1(web3tracer_entry_t *currentEntry TSRMLS_DC){
+	if(currentEntry){
+		if(
+			currentEntry->tagNo
+		){
+			web3tracer_out(currentEntry->tagNo TSRMLS_CC);
+			currentEntry->tagNo=0;
+		}
+	}
+}
 
+static void web3tracer_procTag2(TSRMLS_D){
+	if(WEB3TRACER_G(lastInEntry)){
+		web3tracer_entry_t	*target=WEB3TRACER_G(lastInEntry);
+		if(
+			(
+				WEB3TRACER_G(reqEndTag) ||
+				WEB3TRACER_G(reqNewTag)
+			) &&
+			target->tagNo
+		){
+			web3tracer_out(target->tagNo);
+			target->tagNo=0;
+			WEB3TRACER_G(reqEndTag)=0;
+		}
+		if(WEB3TRACER_G(reqNewTag)){
+			web3tracer_add_in(
+				++WEB3TRACER_G(call_no),
+				cycle_timer(),
+				"(tag)",
+				NULL,
+				1,
+				WEB3TRACER_G(reqNewTag),
+				NULL,
+				0,
+				1
+				TSRMLS_CC
+			);
+			WEB3TRACER_G(reqNewTag)=0;
+			target->tagNo=WEB3TRACER_G(call_no);
+		}
+		WEB3TRACER_G(lastInEntry)=target;
+	}
+}
+
+static void web3tracer_procTag3(TSRMLS_D){
+	if(WEB3TRACER_G(parentInEntry)){
+		if(
+			WEB3TRACER_G(parentInEntry)->tagNo
+		){
+			web3tracer_replace_out(WEB3TRACER_G(parentInEntry)->tagNo TSRMLS_CC);
+			web3tracer_add_out(0,WEB3TRACER_G(lastInEntry)->time TSRMLS_CC);
+			WEB3TRACER_G(parentInEntry)->tagNo=0;
+		} else {
+			web3tracer_replace_out(0 TSRMLS_CC);
+		}
+	}
+}
 
 /**
  * ***********************
@@ -1016,14 +1133,28 @@ static void clear_frequencies(TSRMLS_D) {
  * @author hzhao, kannan
  */
 ZEND_DLEXPORT void web3tracer_execute (zend_op_array *ops TSRMLS_DC) {
-	int		begun;
-	begun=web3tracer_in(1 TSRMLS_CC);
+	web3tracer_entry_t		*parentEntry=WEB3TRACER_G(lastInEntry),
+							*parentParentEntry=WEB3TRACER_G(parentInEntry),
+							*currentEntry=0;
+	int						begun=web3tracer_in(1 TSRMLS_CC);
+	WEB3TRACER_G(parentInEntry)=parentEntry;
+	if(begun){
+		currentEntry=WEB3TRACER_G(lastInEntry);
+	}
+	
 	uint32	now_call_no=WEB3TRACER_G(call_no);
 	
 	WEB3TRACER_G(_zend_execute)(ops TSRMLS_CC);
   
-	if(begun)
-		web3tracer_out(now_call_no TSRMLS_CC);
+	if(WEB3TRACER_G(enabled)){
+		if(begun){
+			web3tracer_procTag1(currentEntry TSRMLS_CC);
+			web3tracer_out(now_call_no TSRMLS_CC);
+		}
+		WEB3TRACER_G(lastInEntry)=parentEntry;
+		WEB3TRACER_G(parentInEntry)=parentParentEntry;
+		web3tracer_procTag2(TSRMLS_C);
+	}
 }
 
 #undef EX
@@ -1036,10 +1167,16 @@ ZEND_DLEXPORT void web3tracer_execute (zend_op_array *ops TSRMLS_DC) {
  *
  * @author hzhao, kannan
  */
-ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data,
-                                       int ret TSRMLS_DC) {
-	int		begun;
-	begun=web3tracer_in(0 TSRMLS_CC);
+ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data, int ret TSRMLS_DC) {
+	web3tracer_entry_t		*parentEntry=WEB3TRACER_G(lastInEntry),
+							*parentParentEntry=WEB3TRACER_G(parentInEntry),
+							*currentEntry=0;
+	int						begun=web3tracer_in(0 TSRMLS_CC);
+	WEB3TRACER_G(parentInEntry)=parentEntry;
+	if(begun){
+		currentEntry=WEB3TRACER_G(lastInEntry);
+	}
+
 	uint32	now_call_no=WEB3TRACER_G(call_no);
 
   if (!WEB3TRACER_G(_zend_execute_internal)) {
@@ -1065,8 +1202,15 @@ ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data,
     /* call the old override */
     WEB3TRACER_G(_zend_execute_internal)(execute_data, ret TSRMLS_CC);
   }
-	if(begun&&WEB3TRACER_G(enabled))
-		web3tracer_out(now_call_no TSRMLS_CC);
+	if(WEB3TRACER_G(enabled)){
+		if(begun){
+			web3tracer_procTag1(currentEntry TSRMLS_CC);
+			web3tracer_out(now_call_no TSRMLS_CC);
+		}
+		WEB3TRACER_G(lastInEntry)=parentEntry;
+		WEB3TRACER_G(parentInEntry)=parentParentEntry;
+		web3tracer_procTag2(TSRMLS_C);
+	}
 }
 
 /**
@@ -1076,11 +1220,26 @@ ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data,
  */
 ZEND_DLEXPORT zend_op_array* web3tracer_compile_file(zend_file_handle *file_handle,
                                              int type TSRMLS_DC) {
-	zend_execute_data	*data;
-	uint32				now_call_no;
-	zend_op_array*		ret;
-	char				*filename_copy;
+	web3tracer_entry_t		*parentEntry=WEB3TRACER_G(lastInEntry);
+	zend_execute_data		*data;
+	uint32					now_call_no;
+	zend_op_array*			ret;
+	char					*filename_copy;
 	
+	if(WEB3TRACER_G(opt_separateCompileFunc)){
+		web3tracer_add_in(
+			++WEB3TRACER_G(call_no),
+			cycle_timer(),
+			"(compile)",
+			NULL,
+			0,
+			NULL,
+			data->op_array?data->op_array->filename:NULL,
+			data->opline?data->opline->lineno:0,
+			0
+			TSRMLS_CC
+		);
+	}
 	data = EG(current_execute_data);
 	filename_copy=strdup(file_handle->filename);
 	web3tracer_add_in(
@@ -1098,6 +1257,10 @@ ZEND_DLEXPORT zend_op_array* web3tracer_compile_file(zend_file_handle *file_hand
 	now_call_no=WEB3TRACER_G(call_no);
 	ret=WEB3TRACER_G(_zend_compile_file)(file_handle, type TSRMLS_CC);
 	web3tracer_out(now_call_no TSRMLS_CC);
+	if(WEB3TRACER_G(opt_separateCompileFunc)){
+		web3tracer_out(now_call_no-1 TSRMLS_CC);
+	}
+	WEB3TRACER_G(lastInEntry)=parentEntry;
 	return ret;
 }
 
@@ -1105,11 +1268,26 @@ ZEND_DLEXPORT zend_op_array* web3tracer_compile_file(zend_file_handle *file_hand
  * Proxy for zend_compile_string(). Used to profile PHP eval compilation time.
  */
 ZEND_DLEXPORT zend_op_array* web3tracer_compile_string(zval *source_string, char *filename TSRMLS_DC) {
-	zend_execute_data	*data;
-	uint32				now_call_no;
-	zend_op_array*		ret;
-	char				*filename_copy;
+	web3tracer_entry_t		*parentEntry=WEB3TRACER_G(lastInEntry);
+	zend_execute_data		*data;
+	uint32					now_call_no;
+	zend_op_array*			ret;
+	char					*filename_copy;
 
+	if(WEB3TRACER_G(opt_separateCompileFunc)){
+		web3tracer_add_in(
+			++WEB3TRACER_G(call_no),
+			cycle_timer(),
+			"(compile)",
+			NULL,
+			0,
+			NULL,
+			data->op_array?data->op_array->filename:NULL,
+			data->opline?data->opline->lineno:0,
+			0
+			TSRMLS_CC
+		);
+	}
 	data = EG(current_execute_data);
 	filename_copy=strdup(filename);
 	web3tracer_add_in(
@@ -1127,6 +1305,10 @@ ZEND_DLEXPORT zend_op_array* web3tracer_compile_string(zval *source_string, char
 	now_call_no=WEB3TRACER_G(call_no);
 	ret=WEB3TRACER_G(_zend_compile_string)(source_string, filename TSRMLS_CC);
 	web3tracer_out(now_call_no TSRMLS_CC);
+	if(WEB3TRACER_G(opt_separateCompileFunc)){
+		web3tracer_out(now_call_no-1 TSRMLS_CC);
+	}
+	WEB3TRACER_G(lastInEntry)=parentEntry;
 	return ret;
 }
 

@@ -1,5 +1,13 @@
 Modification History:
 
+2.1.0 - 09.10.2013
+===============================================================================
+Improvements:
+	- Added option: separateCompileFunc to group compiles together
+	- Added tagging functionality
+		- function web3tracer_tag($tagName)
+		- function web3tracer_endTag()
+	
 2.0.1 - 24.07.2013
 ===============================================================================
 Bugfixes:
