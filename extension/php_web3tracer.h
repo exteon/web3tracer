@@ -120,7 +120,7 @@ PHP_FUNCTION(web3tracer_endTag);
 #define WEB3TRACER_FNAME_BUFFER			1024		// 1KB
  
 /* web3tracer version                           */
-#define WEB3TRACER_VERSION       "2.0.1"
+#define WEB3TRACER_VERSION       "2.2.0"
 
 /* Fictitious function name to represent top of the call tree. The paranthesis
  * in the name is to ensure we don't conflict with user function names.  */
