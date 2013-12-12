@@ -39,7 +39,7 @@ static void web3tracer_free(TSRMLS_D);
 static void web3tracer_output_xt(FILE *output_file TSRMLS_DC);
 static void web3tracer_process_output(TSRMLS_D);
 
-static void web3tracer_add_in(uint32 call_no, uint64 time, char *func_name, char *class_name, int internal_user, char *include_file, char *call_file, uint call_line_no, int dealloc_include_file TSRMLS_DC);
+static void web3tracer_add_in(uint32 call_no, uint64 time,const char *func_name,const char *class_name, int internal_user,char *include_file,const char *call_file, uint call_line_no, int dealloc_include_file TSRMLS_DC);
 static void web3tracer_add_out(uint32 call_no, uint64 time TSRMLS_DC);
 static void web3tracer_replace_out(uint32 call_no TSRMLS_DC);
 
@@ -52,10 +52,16 @@ static inline double get_us_from_tsc(uint64 count, double cpu_frequency TSRMLS_D
 static zval * web3tracer_hash_lookup(zval *arr, char *symbol, int init TSRMLS_DC);
 static void web3tracer_procTag3(TSRMLS_D);
 
-ZEND_DLEXPORT void web3tracer_execute (zend_op_array *ops TSRMLS_DC);
-ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data, int ret TSRMLS_DC);
-ZEND_DLEXPORT zend_op_array* web3tracer_compile_file(zend_file_handle *file_handle, int type TSRMLS_DC);
-ZEND_DLEXPORT zend_op_array* web3tracer_compile_string(zval *source_string, char *filename TSRMLS_DC);
+#if PHP_VERSION_ID >= 50500
+void web3tracer_execute_ex(zend_execute_data *execute_data TSRMLS_DC);
+void web3tracer_execute_internal(zend_execute_data *execute_data_ptr, zend_fcall_info *fci, int return_value_used TSRMLS_DC);
+#else
+void web3tracer_execute(zend_op_array *op_array TSRMLS_DC);
+void web3tracer_execute_internal (zend_execute_data *execute_data_ptr, int return_value_used TSRMLS_DC);
+#endif
+
+zend_op_array* web3tracer_compile_file(zend_file_handle *file_handle, int type TSRMLS_DC);
+zend_op_array* web3tracer_compile_string(zval *source_string, char *filename TSRMLS_DC);
 
 /* {{{ arginfo */
 ZEND_BEGIN_ARG_INFO(arginfo_web3tracer_enable, 0)
@@ -195,8 +201,15 @@ PHP_FUNCTION(web3tracer_enable) {
 		zend_compile_string = web3tracer_compile_string;
 
 		/* Replace zend_execute with our proxy */
-		WEB3TRACER_G(_zend_execute) = zend_execute;
-		zend_execute  = web3tracer_execute;
+
+		#if PHP_VERSION_ID >= 50500
+		    WEB3TRACER_G(_zend_execute_ex) = zend_execute_ex;
+			zend_execute_ex = web3tracer_execute_ex;
+		#else
+		    WEB3TRACER_G(_zend_execute) = zend_execute;
+			zend_execute  = web3tracer_execute;
+		#endif
+		
 
 		/* Replace zend_execute_internal with our proxy */
 		WEB3TRACER_G(_zend_execute_internal) = zend_execute_internal;
@@ -553,8 +566,8 @@ static void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) 
 								*newCall,
 								*callCursor;
 	uint32						i;
-	char						fname[WEB3TRACER_FNAME_BUFFER],
-								*fnamep;
+	char						fname[WEB3TRACER_FNAME_BUFFER];
+	const char					*fnamep;
 	web3tracer_entry_chunk_t	*chunkCursor;
 	web3tracer_cg_proc_t		time,
 								mmax,
@@ -577,7 +590,10 @@ static void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) 
 						newCall->prev=lastCall;
 						newCall->next=NULL;
 					}
-					if(chunkCursor->entries[i].class_name){
+					if(
+						chunkCursor->entries[i].class_name &&
+						strlen(chunkCursor->entries[i].class_name)
+					){
 						snprintf(fname,WEB3TRACER_FNAME_BUFFER,"%s::%s",chunkCursor->entries[i].class_name,chunkCursor->entries[i].func_name);
 						fnamep=fname;
 					} else {
@@ -676,8 +692,8 @@ static void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) 
  * @author Constantin-Emil MARINA
  */
 static void web3tracer_output_xt(FILE *output_file TSRMLS_DC){
-	char						fname[WEB3TRACER_FNAME_BUFFER],
-								*fnamep;
+	char						fname[WEB3TRACER_FNAME_BUFFER];
+	const char					*fnamep;
 	uint32						i;
 	int							level=0,
 								fs,
@@ -755,7 +771,7 @@ static web3tracer_entry_t *web3tracer_alloc_call(TSRMLS_D){
  *
  * @author Constantin-Emil Marina
  */
-static void web3tracer_add_in(uint32 call_no, uint64 time, char *func_name, char *class_name, int internal_user, char *include_file, char *call_file, uint call_line_no, int dealloc_include_file TSRMLS_DC){
+static void web3tracer_add_in(uint32 call_no, uint64 time, const char *func_name, const char *class_name, int internal_user, char *include_file, const char *call_file, uint call_line_no, int dealloc_include_file TSRMLS_DC){
 	web3tracer_entry_t	*entry;
 	
 	entry=web3tracer_alloc_call(TSRMLS_C);
@@ -774,6 +790,7 @@ static void web3tracer_add_in(uint32 call_no, uint64 time, char *func_name, char
 	entry->tagNo					=0;
 	
 	WEB3TRACER_G(lastInEntry)=entry;
+	
 }
 /**
  * Add function end entry.
@@ -816,92 +833,76 @@ static inline double get_us_from_tsc(uint64 count, double cpu_frequency) {
 
 /**
  * Add function begin entry, with formation of function name.
+ * Largely copied from main/main.c#php_verror
+ * @author Constantin-Emil Marina
  */
 static int web3tracer_in(int internal_user TSRMLS_DC) {
-	zend_execute_data	*data;
-	zend_function		*function;
-	char				*func_name;
-	char				*include_file=NULL;
-	char				*class_name=NULL;
-	int      			add_filename = 0;
+	const char	*function;
+	const char	*include_file=NULL;
+	const char	*class_name=NULL;
+	int			is_function;
 
-	data = EG(current_execute_data);
-	if (data) {
-		function = data->function_state.function;
-		func_name = function->common.function_name;
-		if (func_name) {
-			if (function->common.scope) {
-				class_name = function->common.scope->name;
-			} else if (data->object) {
-				class_name = Z_OBJCE(*data->object)->name;
-			}
-		} else {
-			long     curr_op;
-
-#if ZEND_EXTENSION_API_NO >= 220100525
-			curr_op = data->opline->extended_value;
+	if (EG(current_execute_data) &&
+		EG(current_execute_data)->opline &&
+		EG(current_execute_data)->opline->opcode == ZEND_INCLUDE_OR_EVAL
+	) {
+#if PHP_VERSION_ID >= 50400
+		switch (EG(current_execute_data)->opline->extended_value) {
 #else
-			curr_op = data->opline->op2.u.constant.value.lval;
+		switch (EG(current_execute_data)->opline->op2.u.constant.value.lval) {
 #endif
-
-			switch (curr_op) {
-				case ZEND_EVAL:
-					func_name = "eval";
-					break;
-				case ZEND_INCLUDE:
-					func_name = "include";
-					add_filename = 1;
-					break;
-				case ZEND_REQUIRE:
-					func_name = "require";
-					add_filename = 1;
-					break;
-				case ZEND_INCLUDE_ONCE:
-					func_name = "include_once";
-					add_filename = 1;
-					break;
-				case ZEND_REQUIRE_ONCE:
-					func_name = "require_once";
-					add_filename = 1;
-					break;
-				default:
-					func_name = "???_op";
-					break;
-			}
-			
-			if (add_filename)
-				include_file=(function->op_array).filename;
+			case ZEND_EVAL:
+				function = "eval";
+				is_function = 1;
+				break;
+			case ZEND_INCLUDE:
+				function = "include";
+				include_file=zend_get_executed_filename(TSRMLS_C);
+				is_function = 1;
+				break;
+			case ZEND_INCLUDE_ONCE:
+				function = "include_once";
+				include_file=zend_get_executed_filename(TSRMLS_C);
+				is_function = 1;
+				break;
+			case ZEND_REQUIRE:
+				function = "require";
+				include_file=zend_get_executed_filename(TSRMLS_C);
+				is_function = 1;
+				break;
+			case ZEND_REQUIRE_ONCE:
+				function = "require_once";
+				include_file=zend_get_executed_filename(TSRMLS_C);
+				is_function = 1;
+				break;
+			default:
+				function = "ZEND_INCLUDE_OR_EVAL";
 		}
-
-		web3tracer_add_in(
-			++WEB3TRACER_G(call_no),
-			cycle_timer(),
-			func_name,
-			class_name,
-			internal_user,
-			include_file,
-			data->op_array?data->op_array->filename:NULL,
-			data->opline?data->opline->lineno:0,
-			0
-			TSRMLS_CC
-		); 
-		return 1;
+	} else {
+		function = get_active_function_name(TSRMLS_C);
+		if (!function || !strlen(function)) {
+			return 0;
+		} else {
+			is_function = 1;
+			class_name = get_active_class_name(NULL TSRMLS_CC);
+		}
 	}
-	return 0;
-	/*
-		web3tracer_add_in(
+	web3tracer_add_in(
+		++WEB3TRACER_G(call_no),
+		cycle_timer(),
+		function,
+		class_name,
+		internal_user,
+		include_file,														// const char * to char * cast
+		EG(current_execute_data)&&EG(current_execute_data)->op_array?
+			EG(current_execute_data)->op_array->filename:NULL,
+		EG(current_execute_data)&&EG(current_execute_data)->opline?
+			EG(current_execute_data)->opline->lineno:
 			0,
-			0,
-			NULL,
-			NULL,
-			0,
-			NULL,
-			NULL,
-			0,
-			0
-			TSRMLS_CC
-		); 
-		return 1;*/
+		0
+		TSRMLS_CC
+	);
+	return 1;
 }
 static void web3tracer_out(uint32 call_no TSRMLS_DC){
 	web3tracer_add_out(
@@ -1130,9 +1131,14 @@ static void clear_frequencies(TSRMLS_D) {
  * new execute function. We can do whatever profiling we need to
  * before and after calling the actual zend_execute().
  *
- * @author hzhao, kannan
+ * @author hzhao, kannan, Constantin-Emil Marina 
  */
-ZEND_DLEXPORT void web3tracer_execute (zend_op_array *ops TSRMLS_DC) {
+
+#if PHP_VERSION_ID >= 50500
+void web3tracer_execute_ex(zend_execute_data *execute_data TSRMLS_DC) {
+#else
+void web3tracer_execute(zend_op_array *op_array TSRMLS_DC) {
+#endif
 	web3tracer_entry_t		*parentEntry=WEB3TRACER_G(lastInEntry),
 							*parentParentEntry=WEB3TRACER_G(parentInEntry),
 							*currentEntry=0;
@@ -1144,7 +1150,11 @@ ZEND_DLEXPORT void web3tracer_execute (zend_op_array *ops TSRMLS_DC) {
 	
 	uint32	now_call_no=WEB3TRACER_G(call_no);
 	
-	WEB3TRACER_G(_zend_execute)(ops TSRMLS_CC);
+#if PHP_VERSION_ID >= 50500
+	WEB3TRACER_G(_zend_execute_ex)(execute_data TSRMLS_CC);
+#else
+	WEB3TRACER_G(_zend_execute)(op_array TSRMLS_CC);
+#endif
   
 	if(WEB3TRACER_G(enabled)){
 		if(begun){
@@ -1158,8 +1168,13 @@ ZEND_DLEXPORT void web3tracer_execute (zend_op_array *ops TSRMLS_DC) {
 }
 
 #undef EX
-#define EX(element) ((execute_data)->element)
-#define EX_T(offset) (*(temp_variable *)((char *) EX(Ts) + offset))
+#define EX(element) ((execute_data_ptr)->element)
+
+#if PHP_VERSION_ID >= 50500
+	#define EX_T(offset) (*EX_TMP_VAR(execute_data_ptr, offset))
+#else
+	#define EX_T(offset) (*(temp_variable *)((char *) execute_data_ptr->Ts + offset))
+#endif
 
 /**
  * Very similar to web3tracer_execute. Proxy for zend_execute_internal().
@@ -1167,7 +1182,12 @@ ZEND_DLEXPORT void web3tracer_execute (zend_op_array *ops TSRMLS_DC) {
  *
  * @author hzhao, kannan
  */
-ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data, int ret TSRMLS_DC) {
+
+#if PHP_VERSION_ID >= 50500
+void web3tracer_execute_internal(zend_execute_data *execute_data_ptr, zend_fcall_info *fci, int return_value_used TSRMLS_DC){
+#else
+void web3tracer_execute_internal (zend_execute_data *execute_data_ptr, int return_value_used TSRMLS_DC){
+#endif
 	web3tracer_entry_t		*parentEntry=WEB3TRACER_G(lastInEntry),
 							*parentParentEntry=WEB3TRACER_G(parentInEntry),
 							*currentEntry=0;
@@ -1189,18 +1209,22 @@ ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data, 
                        retvar->var.ptr,
                        (EX(function_state).function->common.fn_flags & ZEND_ACC_RETURN_REFERENCE) ?
                        &retvar->var.ptr:NULL,
-                       EX(object), ret TSRMLS_CC);
+                       EX(object), return_value_used TSRMLS_CC);
 #else
     ((zend_internal_function *) EX(function_state).function)->handler(
                        opline->extended_value,
                        EX_T(opline->result.u.var).var.ptr,
                        EX(function_state).function->common.return_reference ?
                        &EX_T(opline->result.u.var).var.ptr:NULL,
-                       EX(object), ret TSRMLS_CC);
+                       EX(object), return_value_used TSRMLS_CC);
 #endif
   } else {
     /* call the old override */
-    WEB3TRACER_G(_zend_execute_internal)(execute_data, ret TSRMLS_CC);
+#if PHP_VERSION_ID >= 50500
+	WEB3TRACER_G(_zend_execute_internal)(execute_data_ptr, fci, return_value_used TSRMLS_CC);
+#else
+	WEB3TRACER_G(_zend_execute_internal)(execute_data_ptr, return_value_used TSRMLS_CC);
+#endif
   }
 	if(WEB3TRACER_G(enabled)){
 		if(begun){
@@ -1216,9 +1240,9 @@ ZEND_DLEXPORT void web3tracer_execute_internal(zend_execute_data *execute_data, 
 /**
  * Proxy for zend_compile_file(). Used to profile PHP compilation time.
  *
- * @author kannan, hzhao
+ * @author kannan, hzhao, Constantin-Emil Marina
  */
-ZEND_DLEXPORT zend_op_array* web3tracer_compile_file(zend_file_handle *file_handle,
+zend_op_array* web3tracer_compile_file(zend_file_handle *file_handle,
                                              int type TSRMLS_DC) {
 	web3tracer_entry_t		*parentEntry=WEB3TRACER_G(lastInEntry);
 	zend_execute_data		*data;
@@ -1267,7 +1291,7 @@ ZEND_DLEXPORT zend_op_array* web3tracer_compile_file(zend_file_handle *file_hand
 /**
  * Proxy for zend_compile_string(). Used to profile PHP eval compilation time.
  */
-ZEND_DLEXPORT zend_op_array* web3tracer_compile_string(zval *source_string, char *filename TSRMLS_DC) {
+zend_op_array* web3tracer_compile_string(zval *source_string, char *filename TSRMLS_DC) {
 	web3tracer_entry_t		*parentEntry=WEB3TRACER_G(lastInEntry);
 	zend_execute_data		*data;
 	uint32					now_call_no;
@@ -1324,7 +1348,11 @@ ZEND_DLEXPORT zend_op_array* web3tracer_compile_string(zval *source_string, char
  */
 static void web3tracer_stop(TSRMLS_D) {
 	/* Remove proxies, restore the originals */
-	zend_execute          = WEB3TRACER_G(_zend_execute);
+#if PHP_VERSION_ID >= 50500
+	zend_execute_ex     = WEB3TRACER_G(_zend_execute_ex);
+#else
+    zend_execute        = WEB3TRACER_G(_zend_execute);
+#endif
 	zend_execute_internal = WEB3TRACER_G(_zend_execute_internal);
 	zend_compile_file     = WEB3TRACER_G(_zend_compile_file);
 	zend_compile_string = WEB3TRACER_G(_zend_compile_string);

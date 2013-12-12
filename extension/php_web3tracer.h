@@ -199,11 +199,11 @@ typedef struct web3tracer_cg_proc_t {
 	uint64							time;
 	uint64							mmax;
 	uint64							mem;
-	char*							func_name;
-	char*							class_name;
+	const char*						func_name;
+	const char*						class_name;
 	int								internal_user;
 	char*							include_file;
-	char*							call_file;
+	const char*						call_file;
 	uint							call_line_no;
 	int								dealloc_include_file;
 	uint32							tagNo;
@@ -246,17 +246,18 @@ ZEND_BEGIN_MODULE_GLOBALS(web3tracer)
 	web3tracer_entry_chunk_t	*last_entry_chunk;
 	web3tracer_entry_t			*next_entry;
 	uint32					call_no;
-	/* Pointer to the original execute function */
-	ZEND_DLEXPORT void (*_zend_execute) (zend_op_array *ops TSRMLS_DC);
 
-	/* Pointer to the origianl execute_internal function */
-	ZEND_DLEXPORT void (*_zend_execute_internal) (zend_execute_data *data,
-							int ret TSRMLS_DC);
-
+#if PHP_VERSION_ID >= 50500
+	void (*_zend_execute_ex)(zend_execute_data *execute_data TSRMLS_DC);
+	void (*_zend_execute_internal)(zend_execute_data *execute_data_ptr, zend_fcall_info *fci, int return_value_used TSRMLS_DC);
+#else
+	void (*_zend_execute)(zend_op_array *op_array TSRMLS_DC);
+	void (*_zend_execute_internal) (zend_execute_data *execute_data_ptr, int return_value_used TSRMLS_DC);
+#endif	
 	/* Pointer to the original compile function */
-	ZEND_DLEXPORT zend_op_array * (*_zend_compile_file) (zend_file_handle *file_handle,
+	zend_op_array * (*_zend_compile_file) (zend_file_handle *file_handle,
 							int type TSRMLS_DC);
-	ZEND_DLEXPORT zend_op_array* (*_zend_compile_string) (zval *source_string,
+	zend_op_array* (*_zend_compile_string) (zval *source_string,
 							char *filename TSRMLS_DC);
 ZEND_END_MODULE_GLOBALS(web3tracer)
 

@@ -1,0 +1,149 @@
+creator: web3tracer
+cmd: test.php
+desc: Generated on 2013-12-12 20:05:51
+event: time : Execution time
+event: mmax : Maximum allocated memory
+event: mall : Allocated memory
+event: mfre : Freed memory
+event: mvar : Memory operations
+events: time mmax mall mfre mvar
+fl=
+fn=web3tracer_tag
+0 101722025 0 0 0 0
+fl=
+fn=a
+0 167559231 1573752 140028 0 140028
+cfl=
+cfn=web3tracer_tag
+calls=5000 0
+0 6427238 0 0 0 0
+cfl=
+cfn=(tag)(waitSome)
+calls=5000 0
+0 4578860618 0 16 0 16
+cfl=
+cfn=(tag)(goToB)
+calls=5000 0
+0 5862045009 7874240 10734944 10872980 21607924
+cfl=
+cfn=wait
+calls=5000 0
+0 2429574006 0 0 0 0
+fl=
+fn=usleep
+0 9737011758 0 0 0 0
+fl=
+fn=wait
+0 93904994 0 16 0 16
+cfl=
+cfn=usleep
+calls=10000 0
+0 6835731808 0 0 0 0
+fl=
+fn=(tag)(waitSome)
+0 32013825 0 0 0 0
+cfl=
+cfn=wait
+calls=5000 0
+0 4500067873 0 16 0 16
+cfl=
+cfn=web3tracer_tag
+calls=5000 0
+0 46773771 0 0 0 0
+fl=
+fn=(compile)(test-b.php)
+0 1246944648 3362188 8115552 0 8115552
+fl=
+fn=(tag)(goToB)
+0 277719256 0 0 8119920 8119920
+cfl=
+cfn=(compile)(test-b.php)
+calls=4999 0
+0 1246881610 3361624 8113944 0 8113944
+cfl=
+cfn=web3tracer_endTag
+calls=5000 0
+0 603766 0 0 0 0
+cfl=
+cfn=include(/opt/web3tracer/test/test-b.php)
+calls=4998 0
+0 4335488703 4510044 2618220 2750408 5368628
+cfl=
+cfn=<CYCLE include(/opt/web3tracer/test/test-b.php)>
+calls=1 0
+0 1344346 2572 2780 2652 5432
+fl=
+fn=(compile)(/opt/web3tracer/test/test-b.php(2) : eval()'d code)
+0 371461134 2859608 2186808 0 2186808
+fl=
+fn=include(/opt/web3tracer/test/test-b.php)
+0 850820534 1588868 0 2026528 2026528
+cfl=
+cfn=(compile)(/opt/web3tracer/test/test-b.php(2) : eval()'d code)
+calls=5000 0
+0 371461134 2859608 2186808 0 2186808
+cfl=
+cfn=eval
+calls=5000 0
+0 3056651081 63576 432584 345492 778076
+cfl=
+cfn=(compile)(test-b.php)
+calls=1 0
+0 63038 564 1608 0 1608
+cfl=
+cfn=web3tracer_tag
+calls=4999 0
+0 31166611 0 0 0 0
+cfl=
+cfn=(tag)(callA)
+calls=4999 0
+0 26660713 0 0 381040 381040
+fl=
+fn=eval
+0 102406695 63576 432584 0 432584
+cfl=
+cfn=web3tracer_tag
+calls=5000 0
+0 17354405 0 0 0 0
+cfl=
+cfn=(tag)(tagInEval)
+calls=5000 0
+0 2936885469 0 0 345492 345492
+fl=
+fn=(tag)(tagInEval)
+0 35603170 0 0 345492 345492
+cfl=
+cfn=usleep
+calls=5000 0
+0 2901279950 0 0 0 0
+fl=
+fn=web3tracer_endTag
+0 2309188 0 0 0 0
+fl=
+fn=<CYCLE a>
+0     
+cfl=
+cfn=a
+calls=5000 0
+0 13044475712 9447992 10874988 10872980 21747968
+fl=
+fn=(tag)(callA)
+0 24953015 0 0 381040 381040
+cfl=
+cfn=web3tracer_endTag
+calls=4999 0
+0 1705422 0 0 0 0
+fl=
+fn=<CYCLE include(/opt/web3tracer/test/test-b.php)>
+0     
+cfl=
+cfn=include(/opt/web3tracer/test/test-b.php)
+calls=2 0
+0 1344345 2572 2780 2652 5432
+fl=
+fn={main}
+0 42397 0 0 20 20
+cfl=
+cfn=<CYCLE a>
+calls=1 0
+0 13044478234 9447992 10874988 10872980 21747968
