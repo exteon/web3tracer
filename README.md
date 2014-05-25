@@ -8,7 +8,7 @@ It allows you to profile PHP scripts to analyze PHP scripts' performance, from f
 ---
 Check out the **project homepage** at: http://www.exteon.ro/en/products/php-tools/web3tracer
 
-And the **full documentation** at: http://www.exteon.ro/en/products/php-tools/web3tracer
+And the **full documentation** at: http://www.exteon.ro/en/products/php-tools/web3tracer/manual
 
 ---
  
