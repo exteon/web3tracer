@@ -1,5 +1,12 @@
 Modification History:
 
+2.3.0 - 06.10.2015
+===============================================================================
+Improvements:
+	- Added {closure} dereferencing: now {closure} is resolved to something 
+		like {closure}file.php:24 (file name and line of the lambda function)
+	- Removed recusrion decoupling for call_user_func and call_user_func_array
+
 2.2.0 - 13.12.2013
 ===============================================================================
 Improvements:
