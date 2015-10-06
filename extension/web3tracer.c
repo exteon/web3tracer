@@ -449,9 +449,16 @@ PHP_MINFO_FUNCTION(web3tracer TSRMLS_DC)
 	newCall->prop.childAmounts=0;			\
 
 #define web3tracer_cg_stop(prop,amt)																	\
+	someCall=lastCall->prev;																			\
+	while(																								\
+		someCall &&																						\
+		someCall->drop																					\
+	){																									\
+		someCall=someCall->prev;																		\
+	}																									\
 	prop.amount=amt;																					\
-	if(lastCall->prev){																					\
-		lastCall->prev->prop.childAmounts+=prop.amount;													\
+	if(someCall){																						\
+		someCall->prop.childAmounts+=prop.amount;														\
 	}																									\
 	prop.internalAmount=prop.amount-lastCall->prop.childAmounts;										\
 	prop.totalAmountSub=prop.amount-lastCall->prop.delta;												\
@@ -459,7 +466,9 @@ PHP_MINFO_FUNCTION(web3tracer TSRMLS_DC)
 	if(lastCall->cycleSource!=lastCall){																\
 		lastCall->cycleSource->prop.deltaC+=prop.totalAmountSub;										\
 		for(callCursor=lastCall->cycleSource->next;callCursor!=lastCall;callCursor=callCursor->next){	\
-			callCursor->prop.delta+=prop.totalAmountSub;												\
+			if(!callCursor->drop){																		\
+				callCursor->prop.delta+=prop.totalAmountSub;											\
+			}																							\
 		}																								\
 	}																									\
 	if(lastCall->cycle)																					\
