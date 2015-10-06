@@ -202,9 +202,10 @@ typedef struct web3tracer_cg_proc_t {
 	const char*						func_name;
 	const char*						class_name;
 	int								internal_user;
-	char*							include_file;
+	const char*						include_file;
 	const char*						call_file;
 	uint							call_line_no;
+	int								dealloc_func_name;
 	int								dealloc_include_file;
 	uint32							tagNo;
 } web3tracer_entry_t; 

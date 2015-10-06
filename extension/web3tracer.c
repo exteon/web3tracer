@@ -39,7 +39,7 @@ static void web3tracer_free(TSRMLS_D);
 static void web3tracer_output_xt(FILE *output_file TSRMLS_DC);
 static void web3tracer_process_output(TSRMLS_D);
 
-static void web3tracer_add_in(uint32 call_no, uint64 time,const char *func_name,const char *class_name, int internal_user,char *include_file,const char *call_file, uint call_line_no, int dealloc_include_file TSRMLS_DC);
+static void web3tracer_add_in(uint32 call_no, uint64 time,const char *func_name,const char *class_name, int internal_user,const char *include_file,const char *call_file, uint call_line_no, int dealloc_func_name, int dealloc_include_file TSRMLS_DC);
 static void web3tracer_add_out(uint32 call_no, uint64 time TSRMLS_DC);
 static void web3tracer_replace_out(uint32 call_no TSRMLS_DC);
 
@@ -232,7 +232,7 @@ PHP_FUNCTION(web3tracer_enable) {
 
 		WEB3TRACER_G(first_entry_chunk)->next=NULL;
 		WEB3TRACER_G(first_entry_chunk)->len=0;
-		web3tracer_add_in(0, cycle_timer(), WEB3TRACER_ROOT_SYMBOL, NULL, 0, NULL, NULL, 0, 0 TSRMLS_CC);
+		web3tracer_add_in(0, cycle_timer(), WEB3TRACER_ROOT_SYMBOL, NULL, 0, NULL, NULL, 0, 0, 0 TSRMLS_CC);
 	}
 }
 
@@ -613,25 +613,32 @@ static void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) 
 					web3tracer_cg_start(mall,chunkCursor->entries[i].mem);
 					web3tracer_cg_start(mfre,chunkCursor->entries[i].mem);
 					web3tracer_cg_start(mvar,chunkCursor->entries[i].mem);
-					for(callCursor=newCall->prev;callCursor;callCursor=callCursor->firstCycleSource->prev){
-						if(strcmp(newCall->fn,callCursor->fn)==0){
-							newCall->cycleSource=callCursor;
-							if(callCursor->cycle){
-								newCall->cycle=callCursor->cycle;
-								newCall->firstCycleSource=callCursor->firstCycleSource;
-							} else {
-								newCall->firstCycleSource=callCursor;
-								newCycle=malloc(sizeof(web3tracer_cg_cycle_t));
-								newCycle->prev=lastCycle;
-								lastCycle=newCycle;
-								snprintf(fname,WEB3TRACER_FNAME_BUFFER,"<CYCLE %s>",newCall->fn);
-								newCycle->name=strdup(fname);
-								newCycle->time.amount=0;
-								newCycle->mmax.amount=0;
-								newCycle->mall.amount=0;
-								newCycle->mfre.amount=0;
-								newCycle->mvar.amount=0;
-								newCall->cycle=callCursor->cycle=newCycle;
+					if(
+						strcmp(newCall->fn,"call_user_func")!=0 &&
+						strcmp(newCall->fn,"call_user_func_array")!=0
+					){
+						for(callCursor=newCall->prev;callCursor;callCursor=callCursor->firstCycleSource->prev){
+							if(
+								strcmp(newCall->fn,callCursor->fn)==0
+							){
+								newCall->cycleSource=callCursor;
+								if(callCursor->cycle){
+									newCall->cycle=callCursor->cycle;
+									newCall->firstCycleSource=callCursor->firstCycleSource;
+								} else {
+									newCall->firstCycleSource=callCursor;
+									newCycle=malloc(sizeof(web3tracer_cg_cycle_t));
+									newCycle->prev=lastCycle;
+									lastCycle=newCycle;
+									snprintf(fname,WEB3TRACER_FNAME_BUFFER,"<CYCLE %s>",newCall->fn);
+									newCycle->name=strdup(fname);
+									newCycle->time.amount=0;
+									newCycle->mmax.amount=0;
+									newCycle->mall.amount=0;
+									newCycle->mfre.amount=0;
+									newCycle->mvar.amount=0;
+									newCall->cycle=callCursor->cycle=newCycle;
+								}
 							}
 						}
 					}
@@ -771,7 +778,7 @@ static web3tracer_entry_t *web3tracer_alloc_call(TSRMLS_D){
  *
  * @author Constantin-Emil Marina
  */
-static void web3tracer_add_in(uint32 call_no, uint64 time, const char *func_name, const char *class_name, int internal_user, char *include_file, const char *call_file, uint call_line_no, int dealloc_include_file TSRMLS_DC){
+static void web3tracer_add_in(uint32 call_no, uint64 time, const char *func_name, const char *class_name, int internal_user, const char *include_file, const char *call_file, uint call_line_no, int dealloc_func_name, int dealloc_include_file TSRMLS_DC){
 	web3tracer_entry_t	*entry;
 	
 	entry=web3tracer_alloc_call(TSRMLS_C);
@@ -786,6 +793,7 @@ static void web3tracer_add_in(uint32 call_no, uint64 time, const char *func_name
 	entry->include_file				=include_file;
 	entry->call_file				=call_file;
 	entry->call_line_no				=call_line_no;
+	entry->dealloc_func_name		=dealloc_func_name;
 	entry->dealloc_include_file		=dealloc_include_file;
 	entry->tagNo					=0;
 	
@@ -840,7 +848,7 @@ static int web3tracer_in(int internal_user TSRMLS_DC) {
 	const char	*function;
 	const char	*include_file=NULL;
 	const char	*class_name=NULL;
-	int			is_function;
+	int			dealloc_func_name=0;
 
 	if (EG(current_execute_data) &&
 		EG(current_execute_data)->opline &&
@@ -853,37 +861,36 @@ static int web3tracer_in(int internal_user TSRMLS_DC) {
 #endif
 			case ZEND_EVAL:
 				function = "eval";
-				is_function = 1;
 				break;
 			case ZEND_INCLUDE:
 				function = "include";
 				include_file=zend_get_executed_filename(TSRMLS_C);
-				is_function = 1;
 				break;
 			case ZEND_INCLUDE_ONCE:
 				function = "include_once";
 				include_file=zend_get_executed_filename(TSRMLS_C);
-				is_function = 1;
 				break;
 			case ZEND_REQUIRE:
 				function = "require";
 				include_file=zend_get_executed_filename(TSRMLS_C);
-				is_function = 1;
 				break;
 			case ZEND_REQUIRE_ONCE:
 				function = "require_once";
 				include_file=zend_get_executed_filename(TSRMLS_C);
-				is_function = 1;
 				break;
 			default:
 				function = "ZEND_INCLUDE_OR_EVAL";
 		}
+	} 
+	else if(EG(current_execute_data)->function_state.function->common.fn_flags & ZEND_ACC_CLOSURE){
+		function=malloc(WEB3TRACER_FNAME_BUFFER);
+		snprintf((char *)function,WEB3TRACER_FNAME_BUFFER,"{closure}%s:%d",EG(current_execute_data)->function_state.function->op_array.filename,EG(current_execute_data)->function_state.function->op_array.line_start);
+		dealloc_func_name=1;
 	} else {
 		function = get_active_function_name(TSRMLS_C);
 		if (!function || !strlen(function)) {
 			return 0;
 		} else {
-			is_function = 1;
 			class_name = get_active_class_name(NULL TSRMLS_CC);
 		}
 	}
@@ -899,6 +906,7 @@ static int web3tracer_in(int internal_user TSRMLS_DC) {
 		EG(current_execute_data)&&EG(current_execute_data)->opline?
 			EG(current_execute_data)->opline->lineno:
 			0,
+		dealloc_func_name,
 		0
 		TSRMLS_CC
 	);
@@ -945,6 +953,7 @@ static void web3tracer_procTag2(TSRMLS_D){
 				1,
 				WEB3TRACER_G(reqNewTag),
 				NULL,
+				0,
 				0,
 				1
 				TSRMLS_CC
@@ -1260,6 +1269,7 @@ zend_op_array* web3tracer_compile_file(zend_file_handle *file_handle,
 			NULL,
 			data->op_array?data->op_array->filename:NULL,
 			data->opline?data->opline->lineno:0,
+			0,
 			0
 			TSRMLS_CC
 		);
@@ -1275,6 +1285,7 @@ zend_op_array* web3tracer_compile_file(zend_file_handle *file_handle,
 		filename_copy,
 		data->op_array?data->op_array->filename:NULL,
 		data->opline?data->opline->lineno:0,
+		0,
 		1
 		TSRMLS_CC
 	);
@@ -1308,6 +1319,7 @@ zend_op_array* web3tracer_compile_string(zval *source_string, char *filename TSR
 			NULL,
 			data->op_array?data->op_array->filename:NULL,
 			data->opline?data->opline->lineno:0,
+			0,
 			0
 			TSRMLS_CC
 		);
@@ -1323,6 +1335,7 @@ zend_op_array* web3tracer_compile_string(zval *source_string, char *filename TSR
 		filename_copy,
 		data->op_array?data->op_array->filename:NULL,
 		data->opline?data->opline->lineno:0,
+		0,
 		1
 		TSRMLS_CC
 	);
@@ -1372,10 +1385,14 @@ static void web3tracer_free(TSRMLS_D){
 	int							i;
 	
 	while(WEB3TRACER_G(first_entry_chunk)) {
-		for(i=0;i<WEB3TRACER_G(first_entry_chunk)->len;i++)
+		for(i=0;i<WEB3TRACER_G(first_entry_chunk)->len;i++){
 			if(!WEB3TRACER_G(first_entry_chunk)->entries[i].in_out&&WEB3TRACER_G(first_entry_chunk)->entries[i].dealloc_include_file){
-				free(WEB3TRACER_G(first_entry_chunk)->entries[i].include_file);
+				free((void *)WEB3TRACER_G(first_entry_chunk)->entries[i].include_file);
 			}
+			if(!WEB3TRACER_G(first_entry_chunk)->entries[i].in_out&&WEB3TRACER_G(first_entry_chunk)->entries[i].dealloc_func_name){
+				free((void *)WEB3TRACER_G(first_entry_chunk)->entries[i].func_name);
+			}
+		}
 		chunk_cursor=WEB3TRACER_G(first_entry_chunk)->next;
 		web3tracer_free_locked(WEB3TRACER_G(first_entry_chunk),sizeof(web3tracer_entry_chunk_t));
 		WEB3TRACER_G(first_entry_chunk)=chunk_cursor;
