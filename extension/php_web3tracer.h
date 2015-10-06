@@ -173,6 +173,7 @@ typedef struct web3tracer_delta_t {
 } web3tracer_delta_t;
 
 typedef struct web3tracer_cg_call_t {
+	int								drop;
 	char							*fn;
 	web3tracer_delta_t				time;
 	web3tracer_delta_t				mmax;

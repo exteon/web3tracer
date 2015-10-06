@@ -563,6 +563,7 @@ static void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) 
 								*newCycle,
 								*cycleCursor;
 	web3tracer_cg_call_t		*lastCall=NULL,
+								*someCall=NULL,
 								*newCall,
 								*callCursor;
 	uint32						i;
@@ -590,35 +591,46 @@ static void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) 
 						newCall->prev=lastCall;
 						newCall->next=NULL;
 					}
+					newCall->firstCycleSource=newCall;
 					if(
-						chunkCursor->entries[i].class_name &&
-						strlen(chunkCursor->entries[i].class_name)
+						(
+							!chunkCursor->entries[i].class_name ||
+							!strlen(chunkCursor->entries[i].class_name)
+						) &&
+						(
+							strcmp(chunkCursor->entries[i].func_name,"call_user_func")==0 ||
+							strcmp(chunkCursor->entries[i].func_name,"call_user_func_array")==0
+						)
 					){
-						snprintf(fname,WEB3TRACER_FNAME_BUFFER,"%s::%s",chunkCursor->entries[i].class_name,chunkCursor->entries[i].func_name);
-						fnamep=fname;
+						newCall->drop=1;
 					} else {
-						if(chunkCursor->entries[i].include_file){
-							snprintf(fname,WEB3TRACER_FNAME_BUFFER,"%s(%s)",chunkCursor->entries[i].func_name,chunkCursor->entries[i].include_file);
+						newCall->drop=0;
+						if(
+							chunkCursor->entries[i].class_name &&
+							strlen(chunkCursor->entries[i].class_name)
+						){
+							snprintf(fname,WEB3TRACER_FNAME_BUFFER,"%s::%s",chunkCursor->entries[i].class_name,chunkCursor->entries[i].func_name);
 							fnamep=fname;
 						} else {
-							fnamep=chunkCursor->entries[i].func_name;
+							if(chunkCursor->entries[i].include_file){
+								snprintf(fname,WEB3TRACER_FNAME_BUFFER,"%s(%s)",chunkCursor->entries[i].func_name,chunkCursor->entries[i].include_file);
+								fnamep=fname;
+							} else {
+								fnamep=chunkCursor->entries[i].func_name;
+							}
 						}
-					}
-					newCall->fn=strdup(fnamep);
-					newCall->cycleSource=newCall;
-					newCall->firstCycleSource=newCall;
-					newCall->cycle=0;
-					web3tracer_cg_start(time,chunkCursor->entries[i].time);
-					web3tracer_cg_start(mmax,chunkCursor->entries[i].mmax);
-					web3tracer_cg_start(mall,chunkCursor->entries[i].mem);
-					web3tracer_cg_start(mfre,chunkCursor->entries[i].mem);
-					web3tracer_cg_start(mvar,chunkCursor->entries[i].mem);
-					if(
-						strcmp(newCall->fn,"call_user_func")!=0 &&
-						strcmp(newCall->fn,"call_user_func_array")!=0
-					){
+						newCall->fn=strdup(fnamep);
+						newCall->cycleSource=newCall;
+						newCall->cycle=0;
+						newCall->drop=0;
+						web3tracer_cg_start(time,chunkCursor->entries[i].time);
+						web3tracer_cg_start(mmax,chunkCursor->entries[i].mmax);
+						web3tracer_cg_start(mall,chunkCursor->entries[i].mem);
+						web3tracer_cg_start(mfre,chunkCursor->entries[i].mem);
+						web3tracer_cg_start(mvar,chunkCursor->entries[i].mem);
 						for(callCursor=newCall->prev;callCursor;callCursor=callCursor->firstCycleSource->prev){
 							if(
+								!callCursor->drop &&
 								strcmp(newCall->fn,callCursor->fn)==0
 							){
 								newCall->cycleSource=callCursor;
@@ -645,36 +657,45 @@ static void web3tracer_hash_add(zval *arr, char *symbol, uint64 val  TSRMLS_DC) 
 					lastCall=newCall;
 					break;
 				case 1:
-					web3tracer_cg_stop(time,chunkCursor->entries[i].time-lastCall->time.start);
-					web3tracer_cg_stop(mmax,chunkCursor->entries[i].mmax-lastCall->mmax.start);
-					dmem=chunkCursor->entries[i].mem-lastCall->mvar.start;
-					dhave=lastCall->mall.childAmounts-lastCall->mfre.childAmounts;
-					if(dmem>=dhave){
-						web3tracer_cg_stop(mall,lastCall->mfre.childAmounts+dmem);
-						web3tracer_cg_stop(mfre,lastCall->mfre.childAmounts);
-						web3tracer_cg_stop(mvar,2*lastCall->mfre.childAmounts+dmem);
-					} else {
-						web3tracer_cg_stop(mall,lastCall->mall.childAmounts);
-						web3tracer_cg_stop(mfre,lastCall->mall.childAmounts-dmem);
-						web3tracer_cg_stop(mvar,2*lastCall->mall.childAmounts-dmem);
-					}
-					web3tracer_add_output_internal(lastCall->fn,(uint64)(1000*get_us_from_tsc(time.internalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)]) TSRMLS_CC),mmax.internalAmount,mall.internalAmount,mfre.internalAmount,mvar.internalAmount);
-					if(lastCall->cycle){
-						web3tracer_add_output_call(lastCall->cycle->name,lastCall->fn,(uint64)(1000*get_us_from_tsc(time.totalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.totalAmount,mall.totalAmount,mfre.totalAmount,mvar.totalAmount TSRMLS_CC);
-						if(lastCall->cycleSource==lastCall&&lastCall->prev){
-							web3tracer_add_output_call(lastCall->prev->fn,lastCall->cycle->name,(uint64)(1000*get_us_from_tsc(lastCall->cycle->time.amount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),lastCall->cycle->mmax.amount,lastCall->cycle->mall.amount,lastCall->cycle->mfre.amount,lastCall->cycle->mvar.amount TSRMLS_CC);
-							lastCall->cycle->time.amount=0;
-							lastCall->cycle->mmax.amount=0;
-							lastCall->cycle->mall.amount=0;
-							lastCall->cycle->mfre.amount=0;
-							lastCall->cycle->mvar.amount=0;
+					if(!lastCall->drop){
+						web3tracer_cg_stop(time,chunkCursor->entries[i].time-lastCall->time.start);
+						web3tracer_cg_stop(mmax,chunkCursor->entries[i].mmax-lastCall->mmax.start);
+						dmem=chunkCursor->entries[i].mem-lastCall->mvar.start;
+						dhave=lastCall->mall.childAmounts-lastCall->mfre.childAmounts;
+						if(dmem>=dhave){
+							web3tracer_cg_stop(mall,lastCall->mfre.childAmounts+dmem);
+							web3tracer_cg_stop(mfre,lastCall->mfre.childAmounts);
+							web3tracer_cg_stop(mvar,2*lastCall->mfre.childAmounts+dmem);
+						} else {
+							web3tracer_cg_stop(mall,lastCall->mall.childAmounts);
+							web3tracer_cg_stop(mfre,lastCall->mall.childAmounts-dmem);
+							web3tracer_cg_stop(mvar,2*lastCall->mall.childAmounts-dmem);
 						}
-					} else {
-						if(lastCall->prev){
-							web3tracer_add_output_call(lastCall->prev->fn,lastCall->fn,(uint64)(1000*get_us_from_tsc(time.totalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.totalAmount,mall.totalAmount,mfre.totalAmount,mvar.totalAmount TSRMLS_CC);
+						web3tracer_add_output_internal(lastCall->fn,(uint64)(1000*get_us_from_tsc(time.internalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)]) TSRMLS_CC),mmax.internalAmount,mall.internalAmount,mfre.internalAmount,mvar.internalAmount);
+						if(lastCall->cycle){
+							web3tracer_add_output_call(lastCall->cycle->name,lastCall->fn,(uint64)(1000*get_us_from_tsc(time.totalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.totalAmount,mall.totalAmount,mfre.totalAmount,mvar.totalAmount TSRMLS_CC);
+							if(lastCall->cycleSource==lastCall&&lastCall->prev){
+								web3tracer_add_output_call(lastCall->prev->fn,lastCall->cycle->name,(uint64)(1000*get_us_from_tsc(lastCall->cycle->time.amount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),lastCall->cycle->mmax.amount,lastCall->cycle->mall.amount,lastCall->cycle->mfre.amount,lastCall->cycle->mvar.amount TSRMLS_CC);
+								lastCall->cycle->time.amount=0;
+								lastCall->cycle->mmax.amount=0;
+								lastCall->cycle->mall.amount=0;
+								lastCall->cycle->mfre.amount=0;
+								lastCall->cycle->mvar.amount=0;
+							}
+						} else {
+							someCall=lastCall->prev;
+							while(
+								someCall &&
+								someCall->drop
+							){
+								someCall=someCall->prev;
+							}
+							if(someCall){
+								web3tracer_add_output_call(someCall->fn,lastCall->fn,(uint64)(1000*get_us_from_tsc(time.totalAmount,WEB3TRACER_G(cpu_frequencies)[WEB3TRACER_G(cur_cpu_id)])),mmax.totalAmount,mall.totalAmount,mfre.totalAmount,mvar.totalAmount TSRMLS_CC);
+							}
 						}
+						free(lastCall->fn);
 					}
-					free(lastCall->fn);
 					lastCall=lastCall->prev;
 					break;
 			}
