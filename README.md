@@ -1,6 +1,10 @@
 # web3tracer PHP profiler
 ## PHP extension to profile PHP scripts
 
+**V3 release notes (Nov. 10 2018)**
+* **We have rewritten the code and all old limitations related to memory footprint are now lifted. You can now profile a 2-week running script. Enjoy!** We will update the documentation soon to reflect that.
+* **Now also available for PHP 7, make sure to check out the php7 branch. For PHP up to 5.6, use the master branch.**
+
 web3tracer is a PHP profiler / tracer derived from XHProf; it is a PHP profiler module written in C allowing you to profile php script performance with minimum overhead.
  
 It allows you to profile PHP scripts to analyze PHP scripts' performance, from finding bottlenecks to fine tuning execution times. It is an invaluable tool in assessing your PHP code's performance. Using the KCacheGrind graph rendition, you can visualize the execution flow of your scripts. This also gives you a structural overview of code flow, allowing you to easily identify the functional structure of your code.
