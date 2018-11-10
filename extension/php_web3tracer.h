@@ -124,7 +124,7 @@ PHP_FUNCTION(web3tracer_endTag);
 
 /* Fictitious function name to represent top of the call tree. The paranthesis
  * in the name is to ensure we don't conflict with user function names.  */
-#define WEB3TRACER_ROOT_SYMBOL                "{main}"
+#define WEB3TRACER_ROOT_SYMBOL                "(main)"
 
 /* Size of a temp scratch buffer            */
 #define SCRATCH_BUF_LEN            512
@@ -196,25 +196,16 @@ typedef struct web3tracer_cg_proc_t {
  
  typedef struct {
 	uint32							call_no;
+	uint32							tagNo;
+} web3tracer_entry_t; 
+
+typedef struct {
 	int								in_out;
 	uint64							time;
 	uint64							mmax;
 	uint64							mem;
-	const char*						func_name;
-	const char*						class_name;
-	int								internal_user;
-	const char*						include_file;
-	const char*						call_file;
-	uint							call_line_no;
-	int								dealloc_func_name;
-	int								dealloc_include_file;
-	uint32							tagNo;
-} web3tracer_entry_t; 
-typedef struct web3tracer_entry_chunk_t {
-	web3tracer_entry_t				entries[WEB3TRACER_CALL_LIST_INCREMENT];
-	uint32							len;
-	struct web3tracer_entry_chunk_t	*next;
-} web3tracer_entry_chunk_t;
+} web3tracer_big_entry_t; 
+
 
 ZEND_BEGIN_MODULE_GLOBALS(web3tracer)
 	/* web3tracer state */
@@ -222,11 +213,24 @@ ZEND_BEGIN_MODULE_GLOBALS(web3tracer)
 	int					opt_separateCompileFunc;
 	char				*reqNewTag;
 	int					reqEndTag;
-	web3tracer_entry_t	*lastInEntry,
-						*parentInEntry;
+	web3tracer_entry_t	lastInEntry,
+						parentInEntry,
+						*crtParent;
+	
+	/*	Process variables */
+	web3tracer_cg_cycle_t		*lastCycle;
+	web3tracer_cg_call_t		*lastCall;
+	char						fname[WEB3TRACER_FNAME_BUFFER],
+								fname2[WEB3TRACER_FNAME_BUFFER];
+	int							level,
+								have_nesting_error,
+								have_nesting_error_pending;
+	uint64						startTime,
+								adjustTime;
+	
 	
 	/* Output variable */
-	zval	*z_out;
+	zval	z_out;
 
 	/* This array is used to store cpu frequencies for all available logical
 	 * cpus.  For now, we assume the cpu frequencies will not change for power
@@ -244,18 +248,10 @@ ZEND_BEGIN_MODULE_GLOBALS(web3tracer)
 	/* The cpu id current process is bound to. (default 0) */
 	uint32 cur_cpu_id;
 	uint64						init_time;
-	web3tracer_entry_chunk_t	*first_entry_chunk;
-	web3tracer_entry_chunk_t	*last_entry_chunk;
-	web3tracer_entry_t			*next_entry;
 	uint32					call_no;
 
-#if PHP_VERSION_ID >= 50500
 	void (*_zend_execute_ex)(zend_execute_data *execute_data TSRMLS_DC);
-	void (*_zend_execute_internal)(zend_execute_data *execute_data_ptr, zend_fcall_info *fci, int return_value_used TSRMLS_DC);
-#else
-	void (*_zend_execute)(zend_op_array *op_array TSRMLS_DC);
-	void (*_zend_execute_internal) (zend_execute_data *execute_data_ptr, int return_value_used TSRMLS_DC);
-#endif	
+	void (*_zend_execute_internal) (zend_execute_data *execute_data, zval *return_value);
 	/* Pointer to the original compile function */
 	zend_op_array * (*_zend_compile_file) (zend_file_handle *file_handle,
 							int type TSRMLS_DC);

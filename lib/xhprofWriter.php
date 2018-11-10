@@ -44,7 +44,7 @@
 					);
 					if($main){
 						$wt+=$cData['stats']['time']/1000;
-						$mu+=$cData['stats']['mall']->$cData['stats']['mfre'];
+						$mu+=$cData['stats']['mall']-$cData['stats']['mfre'];
 						$pmu+=$cData['stats']['mmax'];
 					}
 				}
