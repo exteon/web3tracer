@@ -196,25 +196,16 @@ typedef struct web3tracer_cg_proc_t {
  
  typedef struct {
 	uint32							call_no;
+	uint32							tagNo;
+} web3tracer_entry_t; 
+
+typedef struct {
 	int								in_out;
 	uint64							time;
 	uint64							mmax;
 	uint64							mem;
-	const char*						func_name;
-	const char*						class_name;
-	int								internal_user;
-	const char*						include_file;
-	const char*						call_file;
-	uint							call_line_no;
-	int								dealloc_func_name;
-	int								dealloc_include_file;
-	uint32							tagNo;
-} web3tracer_entry_t; 
-typedef struct web3tracer_entry_chunk_t {
-	web3tracer_entry_t				entries[WEB3TRACER_CALL_LIST_INCREMENT];
-	uint32							len;
-	struct web3tracer_entry_chunk_t	*next;
-} web3tracer_entry_chunk_t;
+} web3tracer_big_entry_t; 
+
 
 ZEND_BEGIN_MODULE_GLOBALS(web3tracer)
 	/* web3tracer state */
@@ -222,8 +213,21 @@ ZEND_BEGIN_MODULE_GLOBALS(web3tracer)
 	int					opt_separateCompileFunc;
 	char				*reqNewTag;
 	int					reqEndTag;
-	web3tracer_entry_t	*lastInEntry,
-						*parentInEntry;
+	web3tracer_entry_t	lastInEntry,
+						parentInEntry,
+						*crtParent;
+	
+	/*	Process variables */
+	web3tracer_cg_cycle_t		*lastCycle;
+	web3tracer_cg_call_t		*lastCall;
+	char						fname[WEB3TRACER_FNAME_BUFFER],
+								fname2[WEB3TRACER_FNAME_BUFFER];
+	int							level,
+								have_nesting_error,
+								have_nesting_error_pending;
+	uint64						startTime,
+								adjustTime;
+	
 	
 	/* Output variable */
 	zval	*z_out;
@@ -244,9 +248,6 @@ ZEND_BEGIN_MODULE_GLOBALS(web3tracer)
 	/* The cpu id current process is bound to. (default 0) */
 	uint32 cur_cpu_id;
 	uint64						init_time;
-	web3tracer_entry_chunk_t	*first_entry_chunk;
-	web3tracer_entry_chunk_t	*last_entry_chunk;
-	web3tracer_entry_t			*next_entry;
 	uint32					call_no;
 
 #if PHP_VERSION_ID >= 50500

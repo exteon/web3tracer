@@ -24,6 +24,7 @@
 	a();
 	
 	$data=web3tracer_disable(WEB3TRACER_OUTPUT_PROCESSED);
+	var_dump($data);
 	include_once('../lib/callgrindWriter.php');
 	include_once('../lib/xhprofWriter.php');
 	web3tracer_callgrindWrite($data);
